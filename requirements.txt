@@ -1,7 +1,6 @@
-
 fastapi
 uvicorn
-tensorflow
+tensorflow-cpu==2.15.0
 numpy
 pymongo
 pillow
