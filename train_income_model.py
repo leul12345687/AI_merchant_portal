@@ -1,22 +1,22 @@
 """
-Income Prediction Training Model
---------------------------------
+Income Prediction Training Model (PyTorch Version)
+---------------------------------------------------
 - Reads booking data from MongoDB
 - Aggregates monthly income per merchant
-- Learns merchant income patterns
-- Saves trained model + scaler
-- Used for auto-retraining
+- Learns income patterns using PyTorch
+- Saves model + scaler
 """
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from sklearn.preprocessing import MinMaxScaler
+import torch
+import torch.nn as nn
 import joblib
+from sklearn.preprocessing import MinMaxScaler
 from datetime import datetime
 from db import get_all_bookings
 
-MODEL_PATH = "income_prediction_model.keras"
+MODEL_PATH = "income_prediction_model.pt"
 SCALER_PATH = "income_scaler.save"
 
 # -------------------------------
@@ -47,6 +47,7 @@ def prepare_training_data():
         payment_date = parse_payment_date(b.get("paymentApprovedAt"))
         if not payment_date:
             continue  # skip unapproved payments
+
         data.append({
             "merchant": str(b["merchant"]),
             "netAmount": b.get("netAmount", 0),
@@ -59,6 +60,7 @@ def prepare_training_data():
         })
 
     df = pd.DataFrame(data)
+
     # Aggregate by merchant + year + month
     df_agg = df.groupby(["merchant", "year", "month"]).agg({
         "netAmount": "sum",
@@ -70,34 +72,64 @@ def prepare_training_data():
 
     # Features & target
     features = df_agg[["netAmount", "vatAmount", "pricePerUnit", "totalPrice", "numberOfUnits"]]
-    target = df_agg["netAmount"]  # monthly income
+    target = df_agg["netAmount"].values.reshape(-1, 1)  # monthly income
 
     # Scaling
     scaler = MinMaxScaler()
     X_scaled = scaler.fit_transform(features)
+    y_scaled = scaler.fit_transform(target)
+
     joblib.dump(scaler, SCALER_PATH)
 
-    return X_scaled, target
+    return X_scaled, y_scaled
 
 # -------------------------------
-# Train regression model
+# PyTorch Regression Model
+# -------------------------------
+class IncomeModel(nn.Module):
+    def __init__(self, input_size):
+        super(IncomeModel, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_size, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)
+        )
+
+    def forward(self, x):
+        return self.network(x)
+
+# -------------------------------
+# Train Model
 # -------------------------------
 def train_model():
     X, y = prepare_training_data()
 
-    model = tf.keras.Sequential([
-        tf.keras.layers.Dense(64, activation="relu", input_shape=(X.shape[1],)),
-        tf.keras.layers.Dense(32, activation="relu"),
-        tf.keras.layers.Dense(1)
-    ])
+    X_tensor = torch.tensor(X, dtype=torch.float32)
+    y_tensor = torch.tensor(y, dtype=torch.float32)
 
-    model.compile(optimizer="adam", loss="mse", metrics=["mae"])
-    model.fit(X, y, epochs=20, batch_size=16)
-    model.save(MODEL_PATH)
+    model = IncomeModel(input_size=X.shape[1])
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+    epochs = 50
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        outputs = model(X_tensor)
+        loss = criterion(outputs, y_tensor)
+        loss.backward()
+        optimizer.step()
+
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+
+    # Save model
+    torch.save(model.state_dict(), MODEL_PATH)
     print("Income model trained & saved successfully")
 
 # -------------------------------
-# Run training if script executed
+# Run training
 # -------------------------------
 if __name__ == "__main__":
     train_model()

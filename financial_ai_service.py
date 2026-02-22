@@ -1,41 +1,64 @@
 """
-Financial AI Service - Advanced Version
----------------------------------------
-- Monthly income (current month)
-- Yearly income (all historical)
-- Smart next month prediction (history + trend + AI)
-- Tax estimation & profit
+Financial AI Service - PyTorch Enhanced Version
+-----------------------------------------------
+- Monthly income
+- Yearly income
+- Hybrid prediction (PyTorch + statistical)
+- Trend analysis
+- Tax estimation
 """
 
 import os
-import tensorflow as tf
 import numpy as np
 import joblib
+import torch
+import torch.nn as nn
 from datetime import datetime
 import calendar
 from collections import defaultdict
 from db import get_bookings_by_merchant
 
-
-MODEL_PATH = "income_prediction_model.keras"
+MODEL_PATH = "income_prediction_model.pt"
 SCALER_PATH = "income_scaler.save"
 
 # -----------------------------------
-# Safe Model Loader
+# PyTorch Model Definition
+# -----------------------------------
+class IncomeModel(nn.Module):
+    def __init__(self, input_size):
+        super(IncomeModel, self).__init__()
+        self.network = nn.Sequential(
+            nn.Linear(input_size, 64),
+            nn.ReLU(),
+            nn.Linear(64, 32),
+            nn.ReLU(),
+            nn.Linear(32, 1)
+        )
+
+    def forward(self, x):
+        return self.network(x)
+
+# -----------------------------------
+# Load Model and Scaler
 # -----------------------------------
 model = None
 scaler = None
 
 if os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH):
     try:
-        model = tf.keras.models.load_model(MODEL_PATH)
         scaler = joblib.load(SCALER_PATH)
-        print("Income prediction model loaded successfully.")
-    except Exception as e:
-        print("Error loading income model:", e)
-else:
-    print("Income model or scaler not found. Prediction will use statistical logic.")
 
+        # Load PyTorch model
+        input_size = 5  # netAmount, vatAmount, pricePerUnit, totalPrice, numberOfUnits
+        model = IncomeModel(input_size)
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu')))
+        model.eval()
+
+        print("Financial AI model loaded successfully (PyTorch).")
+    except Exception as e:
+        print("Error loading financial AI model:", e)
+else:
+    print("Financial AI model not found. Using statistical logic only.")
 
 # -----------------------------------
 # Safe date parser
@@ -51,7 +74,6 @@ def parse_payment_date(approved):
         except Exception:
             return None
     return None
-
 
 # -----------------------------------
 # Group bookings by month
@@ -70,7 +92,6 @@ def group_income_by_month(bookings):
     sorted_months = sorted(monthly_income.items())
     return [income for _, income in sorted_months]
 
-
 # -----------------------------------
 # Trend calculation
 # -----------------------------------
@@ -84,9 +105,8 @@ def calculate_trend(monthly_incomes):
     slope = np.polyfit(x, y, 1)[0]
     return slope
 
-
 # -----------------------------------
-# Main Financial Calculation
+# Financial Calculation & Prediction
 # -----------------------------------
 def calculate_financials(merchant_id: str):
 
@@ -148,7 +168,7 @@ def calculate_financials(merchant_id: str):
     )
 
     # ------------------------------
-    # AI Model Enhancement (Optional)
+    # PyTorch AI Model Enhancement (Optional)
     # ------------------------------
     ai_prediction = 0
 
@@ -159,18 +179,22 @@ def calculate_financials(merchant_id: str):
         avg_total_price = np.mean([b.get("totalPrice", 0) for b in bookings])
         avg_units = np.mean([b.get("numberOfUnits", 1) for b in bookings])
 
-        sample = np.array([[
+        sample = np.array([[ 
             projected_current_month,
             vat_total,
             avg_price_per_unit,
             avg_total_price,
             avg_units
-        ]])
+        ]], dtype=np.float32)
 
         try:
             sample_scaled = scaler.transform(sample)
-            ai_prediction = model.predict(sample_scaled, verbose=0)[0][0]
-        except:
+            tensor = torch.tensor(sample_scaled, dtype=torch.float32)
+
+            with torch.no_grad():
+                ai_prediction = model(tensor).item()
+
+        except Exception:
             ai_prediction = statistical_prediction
 
     # ------------------------------

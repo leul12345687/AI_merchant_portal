@@ -1,5 +1,6 @@
-import tensorflow as tf
-import numpy as np
+import torch
+import torchvision.transforms as transforms
+from torchvision import models
 from PIL import Image
 import io
 import os
@@ -8,7 +9,7 @@ import threading
 # ==============================
 # Configuration
 # ==============================
-MODEL_PATH = "rental_validator.keras"
+MODEL_PATH = "rental_validator.pt"
 IMG_SIZE = 224
 
 # Thread safety for model prediction
@@ -28,26 +29,31 @@ RENTAL_KEYWORDS = [
 # ==============================
 def load_model_safe():
     if os.path.exists(MODEL_PATH):
-        print("Loading trained rental validator model...")
-        return tf.keras.models.load_model(MODEL_PATH)
+        print("Loading trained rental validator model (PyTorch)...")
+        model = models.resnet50(weights=None)
+        model.fc = torch.nn.Linear(model.fc.in_features, 1)  # Binary output
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu')))
+        model.eval()
+        return model
 
-    print("No trained model found. Using pretrained EfficientNetB0...")
-    base_model = tf.keras.applications.EfficientNetB0(
-        weights="imagenet",
-        include_top=True
-    )
-    return base_model
+    print("No trained model found. Using pretrained ResNet50...")
+    model = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
+    model.eval()
+    return model
 
 model = load_model_safe()
 
 # ==============================
-# Save model if first time using custom training
+# Image Transform Pipeline
 # ==============================
-def save_model():
-    if not os.path.exists(MODEL_PATH):
-        print(f"Saving model to {MODEL_PATH} ...")
-        model.save(MODEL_PATH)
-        print("Model saved successfully!")
+transform = transforms.Compose([
+    transforms.Resize((IMG_SIZE, IMG_SIZE)),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        mean=[0.485, 0.456, 0.406],
+        std=[0.229, 0.224, 0.225]
+    )
+])
 
 # ==============================
 # Prepare uploaded image
@@ -55,11 +61,8 @@ def save_model():
 def prepare_image(file_bytes: bytes):
     try:
         img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
-        img = img.resize((IMG_SIZE, IMG_SIZE))
-        img_array = np.array(img)
-        img_array = tf.keras.applications.efficientnet.preprocess_input(img_array)
-        img_array = np.expand_dims(img_array, axis=0)
-        return img_array
+        img = transform(img).unsqueeze(0)
+        return img
     except Exception:
         raise ValueError("Invalid image file")
 
@@ -70,29 +73,16 @@ def validate_asset_image(file_bytes: bytes):
     image = prepare_image(file_bytes)
 
     with model_lock:
-        preds = model.predict(image)
+        with torch.no_grad():
+            preds = model(image)
 
-    # Case 1: Custom binary-trained model (output shape 1)
-    if model.output_shape[-1] == 1:
-        score = preds[0][0]
-        is_rental = score > 0.5
-        return {
-            "allowed_upload": bool(is_rental),
-            "confidence": float(score if is_rental else 1 - score),
-            "message": "Rental asset image accepted"
-            if is_rental else "Rejected: non-rental image"
-        }
-
-    # Case 2: Pretrained ImageNet fallback
-    decoded = tf.keras.applications.efficientnet.decode_predictions(preds, top=3)[0]
-    label = decoded[0][1]
-    confidence = float(decoded[0][2])
-    is_rental = any(word in label.lower() for word in RENTAL_KEYWORDS)
+    # Binary classification (ResNet output)
+    score = torch.sigmoid(preds).item()
+    is_rental = score > 0.5
 
     return {
         "allowed_upload": bool(is_rental),
-        "prediction": label,
-        "confidence": confidence,
+        "confidence": float(score if is_rental else 1 - score),
         "message": "Rental asset image accepted"
         if is_rental else "Rejected: non-rental image"
     }
