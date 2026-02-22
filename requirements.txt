@@ -1,7 +1,7 @@
 fastapi==0.110.0
 uvicorn==0.29.0
-torch==2.2.1
-torchvision==0.17.1
+torch==2.10.0
+torchvision
 numpy==1.26.4
 pandas==2.2.1
 pymongo==4.6.1
