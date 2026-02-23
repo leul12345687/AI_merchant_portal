@@ -124,7 +124,7 @@ def train_model():
         verbose=1
     )
 
-    model.save(MODEL_PATH)
+    model.save(MODEL_PATH, save_format="keras")
 
     print("Income model trained & saved successfully")
 
