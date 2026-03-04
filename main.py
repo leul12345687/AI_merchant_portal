@@ -45,16 +45,10 @@ scaler = None
 model_last_loaded_time = 0
 
 
-# -----------------------------------------
-# Health check endpoint
-# -----------------------------------------
-@app.get("/")
-def root():
-    return {
-        "status": "running",
-        "service": "Rental Asset Fraud Detection API"
-    }
-
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+    
 scheduler = BackgroundScheduler()
 
 # Run demand model every 6 hours
