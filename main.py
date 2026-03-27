@@ -50,7 +50,7 @@ scheduler = BackgroundScheduler()
 
 # Run demand model every 6 hours
 scheduler.add_job(train_predict_model, 'interval', hours=6, next_run_time=None)
-
+scheduler.add_job(ping_services, 'interval', minutes=10)
 # Run income model every 6 hours
 scheduler.add_job(train_model, 'interval', hours=6, next_run_time=None)
 
@@ -59,21 +59,20 @@ scheduler.start()
 # ==============================
 # Keep-alive / AI Wake-up Thread
 # ==============================
-def keep_alive():
-    while True:
-        for url in KEEP_ALIVE_URLS:
-            url = url.strip()
-            if not url:
-                continue
-            try:
-                resp = requests.get(url, timeout=10)
-                print(f"🔁 Ping {url}: {resp.status_code}")
-            except Exception as e:
-                print(f"⚠️ Failed to ping {url}: {str(e)}")
-        # Wait 20 minutes before next ping
-        time.sleep(1200)
+def ping_services():
+    print("🚀 Running keep-alive job...")
 
-threading.Thread(target=keep_alive, daemon=True).start()
+    for url in KEEP_ALIVE_URLS:
+        url = url.strip()
+        if not url:
+            continue
+
+        try:
+            full_url = f"{url}/health"
+            resp = requests.get(full_url, timeout=10)
+            print(f"🔁 Ping {full_url}: {resp.status_code}")
+        except Exception as e:
+            print(f"⚠️ Failed to ping {url}: {str(e)}")
 
 # ==============================
 # Health Check
