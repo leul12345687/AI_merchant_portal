@@ -1,9 +1,13 @@
-import tensorflow as tf
 import numpy as np
 from PIL import Image
 import io
 import os
 import threading
+
+try:
+    import tensorflow as tf
+except Exception:
+    tf = None
 
 # ==============================
 # Configuration
@@ -27,6 +31,10 @@ RENTAL_KEYWORDS = [
 # Load or initialize model
 # ==============================
 def load_model_safe():
+    if tf is None:
+        print("TensorFlow not available. Image validation AI model is disabled.")
+        return None
+
     if os.path.exists(MODEL_PATH):
         print("Loading trained rental validator model...")
         return tf.keras.models.load_model(MODEL_PATH)
@@ -56,6 +64,9 @@ def save_model():
 # Prepare uploaded image
 # ==============================
 def prepare_image(file_bytes: bytes):
+    if tf is None:
+        raise RuntimeError("TensorFlow is not installed in this environment")
+
     try:
         img = Image.open(io.BytesIO(file_bytes)).convert("RGB")
         img = img.resize((IMG_SIZE, IMG_SIZE))
@@ -71,6 +82,9 @@ def prepare_image(file_bytes: bytes):
 # Validate asset image
 # ==============================
 def validate_asset_image(file_bytes: bytes):
+    if tf is None or model is None:
+        raise RuntimeError("Image validation is temporarily unavailable on this deployment")
+
     image = prepare_image(file_bytes)
 
     with model_lock:

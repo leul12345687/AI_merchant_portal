@@ -10,13 +10,17 @@
 # ===============================================
 
 import os
-import tensorflow as tf
 import numpy as np
 import joblib
 from datetime import datetime
 import calendar
 from collections import defaultdict
 from db import get_bookings_by_merchant
+
+try:
+    import tensorflow as tf
+except Exception:
+    tf = None
 
 
 # ===============================================
@@ -35,9 +39,12 @@ scaler = None
 
 if os.path.exists(MODEL_PATH) and os.path.exists(SCALER_PATH):
     try:
-        model = tf.keras.models.load_model(MODEL_PATH)
-        scaler = joblib.load(SCALER_PATH)
-        print("Income prediction model loaded successfully.")
+        if tf is not None:
+            model = tf.keras.models.load_model(MODEL_PATH)
+            scaler = joblib.load(SCALER_PATH)
+            print("Income prediction model loaded successfully.")
+        else:
+            print("TensorFlow not available. Falling back to statistical income prediction.")
     except Exception as e:
         print("Error loading income model:", e)
 else:

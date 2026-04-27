@@ -10,11 +10,15 @@
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 from sklearn.preprocessing import MinMaxScaler
 import joblib
 from datetime import datetime
 from db import get_all_bookings
+
+try:
+    import tensorflow as tf
+except Exception:
+    tf = None
 
 
 MODEL_PATH = "income_prediction_model.keras"
@@ -102,6 +106,10 @@ def prepare_training_data():
 # Train regression model
 # -----------------------------------
 def train_model():
+    if tf is None:
+        print("TensorFlow is not installed. Skipping income model training.")
+        return
+
     X, y = prepare_training_data()
 
     model = tf.keras.Sequential([
