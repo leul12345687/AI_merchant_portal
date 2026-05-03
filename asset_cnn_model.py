@@ -116,3 +116,109 @@ def validate_asset_image(file_bytes: bytes):
         "message": "Rental asset image accepted"
         if is_rental else "Rejected: non-rental image"
     }
+
+
+def _binary_classification_metrics(y_true, y_prob, threshold=0.5):
+    y_true = np.array(y_true).astype(int)
+    y_prob = np.array(y_prob).astype(float)
+    y_pred = (y_prob >= threshold).astype(int)
+
+    accuracy = float((y_pred == y_true).mean()) if y_true.size else 0.0
+    tp = int(((y_pred == 1) & (y_true == 1)).sum())
+    fp = int(((y_pred == 1) & (y_true == 0)).sum())
+    fn = int(((y_pred == 0) & (y_true == 1)).sum())
+
+    precision = float(tp / (tp + fp)) if (tp + fp) > 0 else 0.0
+    recall = float(tp / (tp + fn)) if (tp + fn) > 0 else 0.0
+    f1 = float((2 * precision * recall) / (precision + recall)) if (precision + recall) > 0 else 0.0
+
+    auc_metric = tf.keras.metrics.AUC()
+    auc_metric.update_state(y_true, y_prob)
+    auc = float(auc_metric.result().numpy())
+
+    return {
+        "accuracy": accuracy,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        "roc_auc": auc
+    }
+
+
+def evaluate_asset_cnn(dataset_dir, batch_size=32, limit=None):
+    if tf is None or model is None:
+        raise RuntimeError("TensorFlow or model is not available for evaluation")
+
+    if not os.path.isdir(dataset_dir):
+        raise ValueError("Dataset directory not found")
+
+    if model.output_shape[-1] == 1:
+        label_mode = "binary"
+    else:
+        label_mode = "categorical"
+
+    ds = tf.keras.utils.image_dataset_from_directory(
+        dataset_dir,
+        labels="inferred",
+        label_mode=label_mode,
+        image_size=(IMG_SIZE, IMG_SIZE),
+        batch_size=batch_size,
+        shuffle=False
+    )
+
+    ds = ds.map(
+        lambda x, y: (tf.keras.applications.efficientnet.preprocess_input(tf.cast(x, tf.float32)), y)
+    )
+
+    num_samples = 0
+
+    if model.output_shape[-1] == 1:
+        y_true = []
+        y_prob = []
+
+        for images, labels in ds:
+            preds = model.predict_on_batch(images).reshape(-1)
+            y_prob.extend(preds.tolist())
+            y_true.extend(labels.numpy().reshape(-1).tolist())
+            num_samples += len(labels)
+            if limit and num_samples >= limit:
+                break
+
+        if limit:
+            y_true = y_true[:limit]
+            y_prob = y_prob[:limit]
+
+        metrics = _binary_classification_metrics(y_true, y_prob)
+        return {
+            "status": "success",
+            "num_samples": int(len(y_true)),
+            "metrics": metrics
+        }
+
+    num_classes = len(ds.class_names)
+    if model.output_shape[-1] != num_classes:
+        raise RuntimeError("Dataset class count does not match model output classes")
+
+    top1 = tf.keras.metrics.TopKCategoricalAccuracy(k=1)
+    top5 = tf.keras.metrics.TopKCategoricalAccuracy(k=5)
+    loss_fn = tf.keras.losses.CategoricalCrossentropy()
+    loss_metric = tf.keras.metrics.Mean()
+
+    for images, labels in ds:
+        preds = model.predict_on_batch(images)
+        top1.update_state(labels, preds)
+        top5.update_state(labels, preds)
+        loss_metric.update_state(loss_fn(labels, preds))
+        num_samples += len(labels)
+        if limit and num_samples >= limit:
+            break
+
+    return {
+        "status": "success",
+        "num_samples": int(num_samples if not limit else min(num_samples, limit)),
+        "metrics": {
+            "top1_accuracy": float(top1.result().numpy()),
+            "top5_accuracy": float(top5.result().numpy()),
+            "categorical_crossentropy": float(loss_metric.result().numpy())
+        }
+    }

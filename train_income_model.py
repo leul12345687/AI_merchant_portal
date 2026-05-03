@@ -8,9 +8,12 @@
 # - Used for auto-retraining
 # ===============================================
 
+import os
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import MinMaxScaler
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import joblib
 from datetime import datetime
 from db import get_all_bookings
@@ -47,7 +50,24 @@ def parse_payment_date(approved):
 # -----------------------------------
 # Prepare training dataset
 # -----------------------------------
-def prepare_training_data():
+def _safe_mape(y_true, y_pred):
+    y_true = np.array(y_true, dtype=float)
+    y_pred = np.array(y_pred, dtype=float)
+    denom = np.where(y_true == 0, 1.0, y_true)
+    return float(np.mean(np.abs((y_true - y_pred) / denom)) * 100.0)
+
+
+def _regression_metrics(y_true, y_pred):
+    mse = mean_squared_error(y_true, y_pred)
+    return {
+        "mae": float(mean_absolute_error(y_true, y_pred)),
+        "rmse": float(np.sqrt(mse)),
+        "r2": float(r2_score(y_true, y_pred)),
+        "mape": _safe_mape(y_true, y_pred)
+    }
+
+
+def _build_income_dataset():
     bookings = get_all_bookings()
 
     if len(bookings) == 0:
@@ -93,6 +113,12 @@ def prepare_training_data():
 
     target = df_agg["netAmount"]  # monthly income target
 
+    return features, target
+
+
+def prepare_training_data():
+    features, target = _build_income_dataset()
+
     # Scaling
     scaler = MinMaxScaler()
     X_scaled = scaler.fit_transform(features)
@@ -135,6 +161,46 @@ def train_model():
     model.save(MODEL_PATH, save_format="keras")
 
     print("Income model trained & saved successfully")
+
+
+def evaluate_income_model(test_size=0.2, random_state=42):
+    if tf is None:
+        return {"status": "error", "message": "TensorFlow is not installed."}
+
+    try:
+        features, target = _build_income_dataset()
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+    if features.empty:
+        return {"status": "error", "message": "No valid booking data after preprocessing."}
+
+    if not os.path.exists(MODEL_PATH):
+        return {"status": "error", "message": "Income model not found."}
+
+    if os.path.exists(SCALER_PATH):
+        scaler = joblib.load(SCALER_PATH)
+        X_scaled = scaler.transform(features)
+    else:
+        X_scaled = MinMaxScaler().fit_transform(features)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled,
+        target,
+        test_size=test_size,
+        random_state=random_state
+    )
+
+    model = tf.keras.models.load_model(MODEL_PATH)
+    preds = model.predict(X_test, verbose=0).reshape(-1)
+    metrics = _regression_metrics(y_test, preds)
+
+    return {
+        "status": "success",
+        "num_samples": int(len(features)),
+        "test_size": float(test_size),
+        "metrics": metrics
+    }
 
 
 # -----------------------------------

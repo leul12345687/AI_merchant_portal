@@ -1,9 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from ai_model_service import check_uploaded_asset
 from predictdemand import predict_pre_upload_demand
 from financial_ai_service import calculate_financials
-from train_income_model import train_model
-from train_model import train_predict_model
+from train_income_model import train_model, evaluate_income_model
+from train_model import train_predict_model, evaluate_predict_model
+from asset_cnn_model import evaluate_asset_cnn
 from apscheduler.schedulers.background import BackgroundScheduler
 from pymongo import MongoClient
 from dotenv import load_dotenv
@@ -133,6 +134,44 @@ def pre_upload_demand(category: str):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+
+# ==============================
+# Model Evaluation Endpoints
+# ==============================
+
+@app.post("/evaluate-demand-model")
+def evaluate_demand_model():
+    result = evaluate_predict_model()
+    if result.get("status") != "success":
+        raise HTTPException(status_code=400, detail=result.get("message", "Evaluation failed"))
+    return result
+
+
+@app.post("/evaluate-income-model")
+def evaluate_income_model_endpoint():
+    result = evaluate_income_model()
+    if result.get("status") != "success":
+        raise HTTPException(status_code=400, detail=result.get("message", "Evaluation failed"))
+    return result
+
+
+@app.post("/evaluate-asset-cnn")
+def evaluate_asset_cnn_endpoint(payload: dict = Body(...)):
+    dataset_dir = payload.get("dataset_dir") or os.getenv("IMAGENET_DATASET_DIR")
+    if not dataset_dir:
+        raise HTTPException(
+            status_code=400,
+            detail="dataset_dir is required or set IMAGENET_DATASET_DIR"
+        )
+
+    batch_size = payload.get("batch_size", 32)
+    limit = payload.get("limit")
+
+    try:
+        result = evaluate_asset_cnn(dataset_dir, batch_size=batch_size, limit=limit)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 # ==============================
 # Startup Event
